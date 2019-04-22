@@ -101,7 +101,7 @@ struct RcInfo {
 
 #define MAP_INVALID_VAL { RC_INVALID, RC_INVALID, RC_INVALID }
 #define MAP_TYPES(T) T(RcPtrInfoMap, rc__map, void *, RcInfo)
-#include "../hash/hash.h"
+#include "hash.h"
 
 #define Rc_Test_Len 8
 struct Rc {
