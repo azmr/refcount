@@ -1,0 +1,21 @@
+= Refcount
+_Memory tracker for refcounts and arena-like use of dynamic memory_
+
+
+== Quick start
+
+
+== Uses
+=== Avoid memory leaks
+=== Track allocations
+=== Refcounts
+=== Arena-like use
+
+
+== API
+=== Functions
+=== Types
+=== Compile-time options
+
+
+== License
