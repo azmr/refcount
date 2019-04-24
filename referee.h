@@ -35,6 +35,10 @@ void *ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t ini
 // stop tracking a ptr
 void *ref_remove(Referee *ref, void *ptr);
 
+// duplicate a given piece of memory that is already tracked by ref
+// returns a pointer to the new memory block
+void *ref_dup(Referee *ref, void *ptr);
+
 // increment or decrement the count for a given reference
 // returns ptr
 void *ref_inc  (Referee *ref, void *ptr);
@@ -44,10 +48,6 @@ void *ref_dec_c(Referee *ref, void *ptr, size_t count);
 // decrement the count, and free the memory if the new count hits 0
 /* void *ref_dec_del(Referee *ref, void *ptr); */
 /* void *ref_dec_c_del(Referee *ref, void *ptr, size_t count); */
-
-// duplicate a given piece of memory that is already tracked by ref
-// returns a pointer to the new memory block
-void *ref_dup(Referee *ref, void *ptr);
 
 // count of references to a particular ptr
 size_t ref_count(Referee *ref, void *ptr);
@@ -158,6 +158,18 @@ void *ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs) {
 // i.e. 1 block of the full size
 void *ref_new(Referee *ref, size_t size, size_t init_refs)
 {   return ref_new_n(ref, size, 1, init_refs);   }
+
+void *ref_dup(Referee *ref, void *ptr, size_t init_refs) {
+	// TODO (api): use referee-specific functions if given
+	void *ref_dup(Referee *ref, void *ptr);
+	RefereeInfo *info = ref_info(ref, ptr);
+	if (info)
+	{
+		result = ref_new_n(ref, info->el_size, info->el_n, init_refs);
+		memcpy(result, ptr, bytes_n);
+	}
+	return result;
+}
 
 
 void *ref_inc_c(Referee *ref, void *ptr, size_t c) {
