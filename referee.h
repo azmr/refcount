@@ -75,9 +75,9 @@ RefereeInfo *ref_info(Referee *ref, void *ptr);
 /* void *ref_stdreallocn(void *ptr, size_t el_size, size_t new_n); */
 /* void  ref_stdfree(void *ptr); */
 
-// forefe a free, regardless of number of references
+// force a free, regardless of number of references
 int ref_free(void *ptr);
-// forefe a free, but only if number of refs is below the given max
+// force a free, but only if number of refs is below the given max
 int ref_free_c(void *ptr, size_t max_refs);
 
 #if defined(REFCOUNT_IMPLEMENTATION) || defined(REFCOUNT_TEST)
@@ -107,7 +107,9 @@ struct RefereeInfo {
 struct Referee {
 	RefereePtrInfoMap ptr_infos;
 
-	// functions for custom allocators?
+	void *allocator;
+	void *(*alloc)(void *allocator, size_t el_n, size_t el_size);
+	void  (*free) (void *allocator, void *ptr);
 };
 
 RefereeInfo *ref_info(Referee *ref, void *ptr) {
