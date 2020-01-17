@@ -1,7 +1,3 @@
-#ifndef REFEREE_NOSTDLIB
-#include <stdlib.h>
-#endif//REFEREE_NOSTDLIB
-
 // TODO:
 // - debugging
 // 		- add __LINE__, __FILE__ (and __func__, where possible)
@@ -11,11 +7,27 @@
 // - add key array (delete by swapping in last key) to allow looping?
 // 		- (this is for general hashmap, is it needed here?)
 // - ensure you can't track NULL ptrs
+// - allow relocatable heaps
+//       mem: |   A   |  B  |     C    |
+//       ptr:               ^
+//       free B
+//       mem: |   A   |-----|     C    |
+//       ptr:               ^
+//       shift C down to fill gap
+//       mem: |   A   |     C    |------
+//       ptr:               ^
+//       make sure ptr(s) point to the right place (if > B, shift down by size of B)
+//       mem: |   A   |     C    |------
+//       ptr:         ^
 
-struct Referee;
-typedef struct Referee Referee;
+#ifndef REFEREE_NOSTDLIB
+#include <stdlib.h>
+#endif//REFEREE_NOSTDLIB
+#ifndef REFEREE_API
+#define REFEREE_API static
+#endif//REFEREE_API
 
-struct RefereeInfo;
+typedef struct Referee     Referee;
 typedef struct RefereeInfo RefereeInfo;
 
 // suffix 'n' for breaking allocations to el_size/num_els
@@ -24,47 +36,47 @@ typedef struct RefereeInfo RefereeInfo;
 
 // allocate some memory and start keeping track of references to it
 // returns a pointer to the start of the allocated memory
-void *ref_new  (Referee *ref, size_t alloc_size, size_t init_refs);
-void *ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs);
+REFEREE_API void *ref_new  (Referee *ref, size_t alloc_size, size_t init_refs);
+REFEREE_API void *ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs);
 
 // start refcounting an already existing ptr
 // returns ptr
 // if ptr is already being refcounted, this acts as ref_inc_c (with init_refs as count)
-void *ref_add  (Referee *ref, void *ptr, size_t alloc_size, size_t init_refs);
-void *ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t init_refs);
-// stop tracking a ptr
-void *ref_remove(Referee *ref, void *ptr);
+REFEREE_API void *ref_add  (Referee *ref, void *ptr, size_t alloc_size, size_t init_refs);
+REFEREE_API void *ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t init_refs);
+// stop tracking a ptr without deallocating it ("forget"?)
+REFEREE_API void *ref_remove(Referee *ref, void *ptr);
 
 // duplicate a given piece of memory that is already tracked by ref
 // returns a pointer to the new memory block
-void *ref_dup(Referee *ref, void *ptr);
+REFEREE_API void *ref_dup(Referee *ref, void *ptr);
 
 // increment or decrement the count for a given reference
 // returns ptr
-void *ref_inc  (Referee *ref, void *ptr);
-void *ref_inc_c(Referee *ref, void *ptr, size_t count);
-void *ref_dec  (Referee *ref, void *ptr);
-void *ref_dec_c(Referee *ref, void *ptr, size_t count);
+REFEREE_API void *ref_inc  (Referee *ref, void *ptr);
+REFEREE_API void *ref_inc_c(Referee *ref, void *ptr, size_t count);
+REFEREE_API void *ref_dec  (Referee *ref, void *ptr);
+REFEREE_API void *ref_dec_c(Referee *ref, void *ptr, size_t count);
 // decrement the count, and free the memory if the new count hits 0
 /* void *ref_dec_del(Referee *ref, void *ptr); */
 /* void *ref_dec_c_del(Referee *ref, void *ptr, size_t count); */
 
 // count of references to a particular ptr
-size_t ref_count(Referee *ref, void *ptr);
+REFEREE_API size_t ref_count(Referee *ref, void *ptr);
 
 // frees and removes all pointers with a refcount of 0
 // returns number removed
-size_t ref_purge(Referee *ref);
+REFEREE_API size_t ref_purge(Referee *ref);
 
 // sets the size of an alloc
-size_t ref_resize(Referee *ref, void *ptr, size_t new_size);
+REFEREE_API size_t ref_resize(Referee *ref, void *ptr, size_t new_size);
 // sets the count of an alloc
-size_t ref_recount(Referee *ref, void *ptr, size_t new_count);
+REFEREE_API size_t ref_recount(Referee *ref, void *ptr, size_t new_count);
 
 // returns a pointer to the reference-count information on ptr.
 // This can be read from or written to
 // returns NULL if ptr is not being refcounted
-RefereeInfo *ref_info(Referee *ref, void *ptr);
+REFEREE_API RefereeInfo *ref_info(Referee *ref, void *ptr);
 
 // uses stdlib allocation (mainly for transition from normal malloc/free code)
 /* void *ref_stdmalloc(size_t size); */
@@ -76,9 +88,9 @@ RefereeInfo *ref_info(Referee *ref, void *ptr);
 /* void  ref_stdfree(void *ptr); */
 
 // force a free, regardless of number of references
-int ref_free(void *ptr);
-// force a free, but only if number of refs is below the given max
-int ref_free_c(void *ptr, size_t max_refs);
+REFEREE_API int ref_free(void *ptr);
+// force a free, but only if number of refs is below the given max (should this be <=)
+REFEREE_API int ref_free_c(void *ptr, size_t max_refs);
 
 #if defined(REFCOUNT_IMPLEMENTATION) || defined(REFCOUNT_TEST)
 
@@ -105,20 +117,26 @@ struct RefereeInfo {
 
 #define Referee_Test_Len 8
 struct Referee {
-	RefereePtrInfoMap ptr_infos;
-
+	// Ordered so that this can be created with constants in any scope (including global)
+	// e.g. Referee ref = { my_allocator, my_alloc, my_free };
 	void *allocator;
 	void *(*alloc)(void *allocator, size_t el_n, size_t el_size);
-	void  (*free) (void *allocator, void *ptr);
+	void *(*free) (void *allocator, void *ptr);
+
+	RefereePtrInfoMap ptr_infos;
 };
 
-RefereeInfo *ref_info(Referee *ref, void *ptr) {
+REFEREE_API RefereeInfo *
+ref_info(Referee *ref, void *ptr)
+{
 	return (ref && ptr)
 		? ref__map_ptr(&ref->ptr_infos, ptr)
 		: 0;
 }
 
-size_t ref_count(Referee *ref, void *ptr) {   
+REFEREE_API size_t
+ref_count(Referee *ref, void *ptr)
+{   
 	RefereeInfo *info = ref_info(ref, ptr);
 	return (info)
 		? info->refcount
@@ -126,7 +144,9 @@ size_t ref_count(Referee *ref, void *ptr) {
 }
 
 
-void *ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t init_refs) {
+REFEREE_API void *
+ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t init_refs)
+{
 	if (! ref || ! ptr) { return 0; }
 
 	RefereeInfo info = {0};
@@ -142,15 +162,19 @@ void *ref_add_n(Referee *ref, void *ptr, size_t el_size, size_t el_n, size_t ini
 	}
 }
 
-void *ref_add(Referee *ref, void *ptr, size_t alloc_size, size_t init_refs)
+REFEREE_API void *
+ref_add(Referee *ref, void *ptr, size_t alloc_size, size_t init_refs)
 {   return ref_add_n(ref, ptr, alloc_size, 1, init_refs);   }
 
-void *ref_remove(Referee *ref, void *ptr)
+REFEREE_API void *
+ref_remove(Referee *ref, void *ptr)
 {   ref__map_remove(&ref->ptr_infos, ptr); return ptr;   }
 
 
 // TODO (api): custom allocators
-void *ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs) {
+REFEREE_API void *
+ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs)
+{
 	void *ptr = malloc(el_size * el_n);
 	return (ptr)
 		? ref_add_n(ref, ptr, el_size, el_n, init_refs)
@@ -158,10 +182,13 @@ void *ref_new_n(Referee *ref, size_t el_size, size_t el_n, size_t init_refs) {
 }
 
 // i.e. 1 block of the full size
-void *ref_new(Referee *ref, size_t size, size_t init_refs)
+REFEREE_API void *
+ref_new(Referee *ref, size_t size, size_t init_refs)
 {   return ref_new_n(ref, size, 1, init_refs);   }
 
-void *ref_dup(Referee *ref, void *ptr, size_t init_refs) {
+REFEREE_API void *
+ref_dup(Referee *ref, void *ptr, size_t init_refs)
+{
 	// TODO (api): use referee-specific functions if given
 	void *ref_dup(Referee *ref, void *ptr);
 	RefereeInfo *info = ref_info(ref, ptr);
@@ -174,18 +201,24 @@ void *ref_dup(Referee *ref, void *ptr, size_t init_refs) {
 }
 
 
-void *ref_inc_c(Referee *ref, void *ptr, size_t c) {
+REFEREE_API inline void *
+ref_inc_c(Referee *ref, void *ptr, size_t c)
+{
 	RefereeInfo *info = ref_info(ref, ptr);
 	if (info) {   info->refcount += c; return ptr;   }
 	else return 0;
 }
-void *ref_inc(Referee *ref, void *ptr) {
+REFEREE_API inline void *
+ref_inc(Referee *ref, void *ptr)
+{
 	RefereeInfo *info = ref_info(ref, ptr);
 	if (info) {   ++info->refcount; return ptr;   }
 	else return 0;
 }
 
-void *ref_dec_c(Referee *ref, void *ptr, size_t c) {
+REFEREE_API void *
+ref_dec_c(Referee *ref, void *ptr, size_t c)
+{
 	RefereeInfo *info = ref_info(ref, ptr);
 	if (info) {
 		if (info->refcount >= c) {   info->refcount -= c;   }
@@ -194,7 +227,9 @@ void *ref_dec_c(Referee *ref, void *ptr, size_t c) {
 	}
 	else return 0;
 }
-void *ref_dec(Referee *ref, void *ptr) {
+REFEREE_API void *
+ref_dec(Referee *ref, void *ptr)
+{
 	RefereeInfo *info = ref_info(ref, ptr);
 	if (info) {
 		if (info->refcount > 0) {   --info->refcount;   }
@@ -204,7 +239,8 @@ void *ref_dec(Referee *ref, void *ptr) {
 }
 
 // clear all that have a refcount of 0
-size_t ref_purge(Referee *ref)
+REFEREE_API size_t 
+ref_purge(Referee *ref)
 {
 	// TODO (opt): this should be sped up by keeping an array of the zero counts
 	size_t deleted_n = 0;
