@@ -35,6 +35,30 @@
 #define REFEREE_FREE(allocator, ptr) free(ptr)
 #endif//REFEREE_FREE
 
+#if REFEREE_DEBUG // control whether callsite is recorded
+#define REF_DBG(fn, ...) fn##_dbg(__VA_ARGS__, int line, char const *file, char const *func)
+
+#define ref_add(...)       ref_add_dbg(__VA_ARGS__,       __LINE__, __FILE__, __func__)
+#define ref_add_n(...)     ref_add_n_dbg(__VA_ARGS__,     __LINE__, __FILE__, __func__)
+#define ref_new(...)       ref_new_dbg(__VA_ARGS__,       __LINE__, __FILE__, __func__)
+#define ref_new_n(...)     ref_new_n_dbg(__VA_ARGS__,     __LINE__, __FILE__, __func__)
+#define ref_realloc(...)   ref_realloc_dbg(__VA_ARGS__,   __LINE__, __FILE__, __func__)
+#define ref_realloc_n(...) ref_realloc_n_dbg(__VA_ARGS__, __LINE__, __FILE__, __func__)
+
+#define ref_add_n_(...)     ref_add_n_dbg(__VA_ARGS__,     line, file, func)
+#define ref_new_n_(...)     ref_new_n_dbg(__VA_ARGS__,     line, file, func)
+#define ref_realloc_n_(...) ref_realloc_n_dbg(__VA_ARGS__, line, file, func)
+
+// internal functions
+
+#else //REFEREE_DEBUG
+#define REF_DBG(fn, ...) fn(__VA_ARGS__)
+
+#define ref_add_n_(...)     ref_add_n(__VA_ARGS__)
+#define ref_new_n_(...)     ref_new_n(__VA_ARGS__)
+#define ref_realloc_n_(...) ref_realloc_n(__VA_ARGS__)
+#endif//REFEREE_DEBUG
+
 typedef struct Referee Referee;
 typedef struct RefInfo RefInfo;
 
@@ -44,20 +68,20 @@ typedef struct RefInfo RefInfo;
 
 // allocate some memory and start keeping track of references to it
 // returns a pointer to the start of the allocated memory
-REFEREE_API void *ref_new  (Referee *ref, size_t alloc_size, size_t init_refs);
-REFEREE_API void *ref_new_n(Referee *ref, size_t el_n, size_t el_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_new,   Referee *ref, size_t alloc_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_new_n, Referee *ref, size_t el_n, size_t el_size, size_t init_refs);
 
 // start refcounting an already existing ptr
 // returns ptr
 // if ptr is already being refcounted, this acts as ref_inc_c (with init_refs as count)
-REFEREE_API void *ref_add  (Referee *ref, void *ptr, size_t alloc_size, size_t init_refs);
-REFEREE_API void *ref_add_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_add,   Referee *ref, void *ptr, size_t alloc_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_add_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs);
 // stop tracking a ptr without deallocating it ("forget"?)
 REFEREE_API void *ref_remove(Referee *ref, void *ptr);
 
 // duplicate a given piece of memory that is already tracked by ref
 // returns a pointer to the new memory block
-REFEREE_API void *ref_dup(Referee *ref, void *ptr, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_dup, Referee *ref, void *ptr, size_t init_refs);
 
 // increment or decrement the count for a given reference
 // returns ptr
@@ -80,8 +104,8 @@ REFEREE_API size_t ref_purge(Referee *ref);
 // sort out naming convention with new above
 // should there be some returned count of references?
 // reallocate but maintain
-REFEREE_API void *ref_realloc(Referee   *ref, void *ptr, size_t new_size, size_t init_refs);
-REFEREE_API void *ref_realloc_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_realloc,   Referee *ref, void *ptr, size_t new_size, size_t init_refs);
+REFEREE_API void *REF_DBG(ref_realloc_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs);
 
 // sets the size of an alloc
 REFEREE_API size_t ref_resize(Referee *ref, void *ptr, size_t new_size);
@@ -118,12 +142,10 @@ struct RefInfo {
 	size_t el_n;
 	size_t el_size;
 
-#ifdef REFEREE_DEBUG
-#ifdef  REFEREE_DEBUG_FUNC
-	char *func;
-#endif//REFEREE_DEBUG_FUNC
-	char *file;
-	size_t line_n;
+#if REFEREE_DEBUG
+	size_t line;
+	char const *file;
+	char const *func;
 #endif//REFEREE_DEBUG
 };
 
@@ -162,7 +184,7 @@ ref_count(Referee *ref, void *ptr)
 
 
 REFEREE_API void *
-ref_add_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs)
+REF_DBG(ref_add_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs)
 {
 	if (! ref || ! ptr) { return 0; }
 
@@ -170,6 +192,12 @@ ref_add_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs
 	info.refcount = init_refs;
 	info.el_n     = el_n;
 	info.el_size  = el_size;
+
+#if REFEREE_DEBUG
+    info.line = line;
+    info.file = file;
+    info.func = func;
+#endif//REFEREE_DEBUG
 
 	int insert_result = ref__map_insert(&ref->ptr_infos, ptr, info);
 	switch (insert_result)
@@ -181,8 +209,8 @@ ref_add_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs
 }
 
 REFEREE_API inline void *
-ref_add(Referee *ref, void *ptr, size_t alloc_size, size_t init_refs)
-{   return ref_add_n(ref, ptr, 1, alloc_size, init_refs);   }
+REF_DBG(ref_add, Referee *ref, void *ptr, size_t alloc_size, size_t init_refs)
+{   return ref_add_n_(ref, ptr, 1, alloc_size, init_refs);   }
 
 REFEREE_API inline void *
 ref_remove(Referee *ref, void *ptr)
@@ -190,24 +218,24 @@ ref_remove(Referee *ref, void *ptr)
 
 
 REFEREE_API inline void *
-ref_new_n(Referee *ref, size_t el_n, size_t el_size, size_t init_refs)
+REF_DBG(ref_new_n, Referee *ref, size_t el_n, size_t el_size, size_t init_refs)
 {
 	// TODO(api): could require an init, then these checks wouldn't be necessary
 	void *ptr = (ref->realloc
 	             ? ref->realloc   (ref->allocator, 0, el_n, el_size)
 	             : REFEREE_REALLOC(ref->allocator, 0, el_n, el_size));
     return (ptr
-            ? ref_add_n(ref, ptr, el_n, el_size, init_refs)
+            ? ref_add_n_(ref, ptr, el_n, el_size, init_refs)
             : ptr);
 }
 
 // i.e. 1 block of the full size
 REFEREE_API inline void *
-ref_new(Referee *ref, size_t size, size_t init_refs)
-{   return ref_new_n(ref, 1, size, init_refs);   }
+REF_DBG(ref_new, Referee *ref, size_t size, size_t init_refs)
+{   return ref_new_n_(ref, 1, size, init_refs);   }
 
 REFEREE_API inline void *
-ref_realloc_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs) // TODO: incorporate init_refs for existing ptrs?
+REF_DBG(ref_realloc_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs)
 {
     void *result = (ref->realloc
                      ? ref->realloc   (ref->allocator, ptr, el_n, el_size)
@@ -215,27 +243,28 @@ ref_realloc_n(Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_
 
     if (result)
     {
+        // TODO: incorporate init_refs for existing ptrs?
         RefInfo info = ref__map_remove(&ref->ptr_infos, ptr);
-        ref_add_n(ref, result, el_n, el_size, (~ info.refcount
-                                               ? info.refcount
-                                               : init_refs));
+        ref_add_n_(ref, result, el_n, el_size, (~ info.refcount
+                                                ? info.refcount
+                                                : init_refs));
     }
     return result;
 }
 
 REFEREE_API inline void *
-ref_realloc(Referee *ref, void *ptr, size_t size, size_t init_refs)
-{   return ref_realloc_n(ref, ptr, 1, size, init_refs);   }
+REF_DBG(ref_realloc, Referee *ref, void *ptr, size_t size, size_t init_refs)
+{   return ref_realloc_n_(ref, ptr, 1, size, init_refs);   }
 
 REFEREE_API void *
-ref_dup(Referee *ref, void *ptr, size_t init_refs)
+REF_DBG(ref_dup, Referee *ref, void *ptr, size_t init_refs)
 {
 	void    *result = 0;
 	RefInfo *info   = ref_info(ref, ptr);
 
 	if (info)
 	{
-		result = ref_new_n(ref, info->el_n, info->el_size, init_refs);
+		result = ref_new_n_(ref, info->el_n, info->el_size, init_refs);
 		memcpy(result, ptr, info->el_n * info->el_size);
 	}
 	return result;
