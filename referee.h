@@ -21,6 +21,7 @@
 //       ptr:         ^
 
 #ifndef REFEREE_NOSTDLIB
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #endif//REFEREE_NOSTDLIB
@@ -36,18 +37,19 @@
 #endif//REFEREE_FREE
 
 #if REFEREE_DEBUG // control whether callsite is recorded
-#define REF_DBG(fn, ...) fn##_dbg(__VA_ARGS__, int line, char const *file, char const *func)
+#define REF_DBG(fn, ...) fn##_dbg(__VA_ARGS__, int line, char const *file, char const *func, char const *args)
+#define REF_DEFER(...) __VA_ARGS__
 
-#define ref_add(...)       ref_add_dbg(__VA_ARGS__,       __LINE__, __FILE__, __func__)
-#define ref_add_n(...)     ref_add_n_dbg(__VA_ARGS__,     __LINE__, __FILE__, __func__)
-#define ref_new(...)       ref_new_dbg(__VA_ARGS__,       __LINE__, __FILE__, __func__)
-#define ref_new_n(...)     ref_new_n_dbg(__VA_ARGS__,     __LINE__, __FILE__, __func__)
-#define ref_realloc(...)   ref_realloc_dbg(__VA_ARGS__,   __LINE__, __FILE__, __func__)
-#define ref_realloc_n(...) ref_realloc_n_dbg(__VA_ARGS__, __LINE__, __FILE__, __func__)
+#define ref_add(...)       ref_add_dbg(__VA_ARGS__,       REF_DEFER(__LINE__, __FILE__, __func__, "ref_add("#__VA_ARGS__")"))
+#define ref_add_n(...)     ref_add_n_dbg(__VA_ARGS__,     REF_DEFER(__LINE__, __FILE__, __func__, "ref_add_n("#__VA_ARGS__")"))
+#define ref_new(...)       ref_new_dbg(__VA_ARGS__,       REF_DEFER(__LINE__, __FILE__, __func__, "ref_new("#__VA_ARGS__")"))
+#define ref_new_n(...)     ref_new_n_dbg(__VA_ARGS__,     REF_DEFER(__LINE__, __FILE__, __func__, "ref_new_n("#__VA_ARGS__")"))
+#define ref_realloc(...)   ref_realloc_dbg(__VA_ARGS__,   REF_DEFER(__LINE__, __FILE__, __func__, "ref_realloc("#__VA_ARGS__")"))
+#define ref_realloc_n(...) ref_realloc_n_dbg(__VA_ARGS__, REF_DEFER(__LINE__, __FILE__, __func__, "ref_realloc_n("#__VA_ARGS__")"))
 
-#define ref_add_n_(...)     ref_add_n_dbg(__VA_ARGS__,     line, file, func)
-#define ref_new_n_(...)     ref_new_n_dbg(__VA_ARGS__,     line, file, func)
-#define ref_realloc_n_(...) ref_realloc_n_dbg(__VA_ARGS__, line, file, func)
+#define ref_add_n_(...)     ref_add_n_dbg(__VA_ARGS__,     line, file, func, args)
+#define ref_new_n_(...)     ref_new_n_dbg(__VA_ARGS__,     line, file, func, args)
+#define ref_realloc_n_(...) ref_realloc_n_dbg(__VA_ARGS__, line, file, func, args)
 
 // internal functions
 
@@ -133,6 +135,10 @@ REFEREE_API void *ref_free(Referee *ref, void *ptr); // TODO: size_t *refcount_o
 // force a free, but only if number of refs is below the given max (should this be < or <=?)
 /* REFEREE_API int ref_free_c(void *ptr, size_t max_refs); */
 
+// returns total memory tracked by referee (in bytes)
+REFEREE_API size_t ref_total_size(Referee *ref);
+REFEREE_API void ref_dump_mem_usage(FILE *out, Referee *ref, int should_destructively_sort);
+
 #if defined(REFEREE_IMPLEMENTATION) || defined(REFEREE_TEST)
 
 #define REFEREE_INVALID (~((size_t)0))
@@ -146,6 +152,7 @@ struct RefInfo {
 	size_t line;
 	char const *file;
 	char const *func;
+	char const *args;
 #endif//REFEREE_DEBUG
 };
 
@@ -197,6 +204,7 @@ REF_DBG(ref_add_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t 
     info.line = line;
     info.file = file;
     info.func = func;
+    info.args = args;
 #endif//REFEREE_DEBUG
 
 	int insert_result = ref__map_insert(&ref->ptr_infos, ptr, info);
@@ -344,6 +352,53 @@ ref_purge(Referee *ref)
 		}
 	}
 	return deleted_n;
+}
+
+REFEREE_API size_t
+ref_total_size(Referee *ref)
+{
+	size_t result = 0;
+	RefInfo const *vals = ref->ptr_infos.vals;
+	for(size_t i = 0,
+			   n = ref->ptr_infos.n;
+		i < n; ++i)
+    {   result += vals[i].el_n * vals[i].el_size;   }
+    return result;
+}
+
+
+static inline int
+RefInfo_cmp_size(const void *a, const void *b)
+{
+    RefInfo ref_a = *(const RefInfo *)a,
+            ref_b = *(const RefInfo *)b;
+    size_t A = ref_a.el_n * ref_a.el_size,
+           B = ref_b.el_n * ref_b.el_size;
+    int result = (B < A) - (A < B);
+    return result;
+}
+
+REFEREE_API void
+ref_dump_mem_usage(FILE *out, Referee *ref, int should_destructively_sort)
+{
+    printf("Total memory tracked: %zu\n", ref_total_size(ref));
+
+    if (should_destructively_sort)
+    {   qsort(ref->ptr_infos.vals, ref->ptr_infos.n, sizeof(ref->ptr_infos.vals[0]), RefInfo_cmp_size);   }
+
+    for(size_t i = 0,
+        n = ref->ptr_infos.n;
+        i < n; ++i)
+    {
+        Addr    ptr  = ref->ptr_infos.keys[i];
+        RefInfo info = ref->ptr_infos.vals[i];
+        fprintf(out, //"0x%08llx:"
+            "%zu bytes. %s - %s(%zu) - \t %s\n",
+            //(unsigned long long)ptr,
+            info.el_n * info.el_size,
+            info.func, info.file, info.line, info.args);
+    }
+    fputc('\n', out);
 }
 
 #endif
