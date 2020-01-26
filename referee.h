@@ -37,28 +37,30 @@
 #endif//REFEREE_FREE
 
 #if REFEREE_DEBUG // control whether callsite is recorded
-#define REF_DBG(fn, ...) fn##_dbg(__VA_ARGS__, int line, char const *file, char const *func, char const *args)
-#define REF_DEFER(...) __VA_ARGS__
+#define REF_DBG(fn, ...) fn##_dbg(__VA_ARGS__, int line, char const *file, char const *func, char const *call)
 
-#define ref_add(...)       ref_add_dbg(__VA_ARGS__,       REF_DEFER(__LINE__, __FILE__, __func__, "ref_add("#__VA_ARGS__")"))
-#define ref_add_n(...)     ref_add_n_dbg(__VA_ARGS__,     REF_DEFER(__LINE__, __FILE__, __func__, "ref_add_n("#__VA_ARGS__")"))
-#define ref_new(...)       ref_new_dbg(__VA_ARGS__,       REF_DEFER(__LINE__, __FILE__, __func__, "ref_new("#__VA_ARGS__")"))
-#define ref_new_n(...)     ref_new_n_dbg(__VA_ARGS__,     REF_DEFER(__LINE__, __FILE__, __func__, "ref_new_n("#__VA_ARGS__")"))
-#define ref_realloc(...)   ref_realloc_dbg(__VA_ARGS__,   REF_DEFER(__LINE__, __FILE__, __func__, "ref_realloc("#__VA_ARGS__")"))
-#define ref_realloc_n(...) ref_realloc_n_dbg(__VA_ARGS__, REF_DEFER(__LINE__, __FILE__, __func__, "ref_realloc_n("#__VA_ARGS__")"))
+#define ref_add(...)                ref_add_dbg(__VA_ARGS__,                __LINE__, __FILE__, __func__, "ref_add("#__VA_ARGS__")")
+#define ref_add_n(...)              ref_add_n_dbg(__VA_ARGS__,              __LINE__, __FILE__, __func__, "ref_add_n("#__VA_ARGS__")")
+#define ref_new(...)                ref_new_dbg(__VA_ARGS__,                __LINE__, __FILE__, __func__, "ref_new("#__VA_ARGS__")")
+#define ref_new_n(...)              ref_new_n_dbg(__VA_ARGS__,              __LINE__, __FILE__, __func__, "ref_new_n("#__VA_ARGS__")")
+#define ref_realloc(...)            ref_realloc_dbg(__VA_ARGS__,            __LINE__, __FILE__, __func__, "ref_realloc("#__VA_ARGS__")")
+#define ref_realloc_n(...)          ref_realloc_n_dbg(__VA_ARGS__,          __LINE__, __FILE__, __func__, "ref_realloc_n("#__VA_ARGS__")")
+#define ref_register_realloc_n(...) ref_register_realloc_n_dbg(__VA_ARGS__, __LINE__, __FILE__, __func__, "ref_register_realloc_n("#__VA_ARGS__")")
 
-#define ref_add_n_(...)     ref_add_n_dbg(__VA_ARGS__,     line, file, func, args)
-#define ref_new_n_(...)     ref_new_n_dbg(__VA_ARGS__,     line, file, func, args)
-#define ref_realloc_n_(...) ref_realloc_n_dbg(__VA_ARGS__, line, file, func, args)
+#define ref_add_n_(...)              ref_add_n_dbg(__VA_ARGS__,     line, file, func, call)
+#define ref_new_n_(...)              ref_new_n_dbg(__VA_ARGS__,     line, file, func, call)
+#define ref_realloc_n_(...)          ref_realloc_n_dbg(__VA_ARGS__, line, file, func, call)
+#define ref_register_realloc_n_(...) ref_register_realloc_n_dbg(__VA_ARGS__, line, file, func, call)
 
 // internal functions
 
 #else //REFEREE_DEBUG
 #define REF_DBG(fn, ...) fn(__VA_ARGS__)
 
-#define ref_add_n_(...)     ref_add_n(__VA_ARGS__)
-#define ref_new_n_(...)     ref_new_n(__VA_ARGS__)
-#define ref_realloc_n_(...) ref_realloc_n(__VA_ARGS__)
+#define ref_add_n_(...)              ref_add_n(__VA_ARGS__)
+#define ref_new_n_(...)              ref_new_n(__VA_ARGS__)
+#define ref_realloc_n_(...)          ref_realloc_n(__VA_ARGS__)
+#define ref_register_realloc_n_(...) ref_register_realloc_n(__VA_ARGS__)
 #endif//REFEREE_DEBUG
 
 typedef struct Referee Referee;
@@ -152,7 +154,7 @@ struct RefInfo {
 	size_t line;
 	char const *file;
 	char const *func;
-	char const *args;
+	char const *call;
 #endif//REFEREE_DEBUG
 };
 
@@ -204,7 +206,7 @@ REF_DBG(ref_add_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t 
     info.line = line;
     info.file = file;
     info.func = func;
-    info.args = args;
+    info.call = call;
 #endif//REFEREE_DEBUG
 
 	int insert_result = ref__map_insert(&ref->ptr_infos, ptr, info);
@@ -229,9 +231,12 @@ REFEREE_API inline void *
 REF_DBG(ref_new_n, Referee *ref, size_t el_n, size_t el_size, size_t init_refs)
 {
 	// TODO(api): could require an init, then these checks wouldn't be necessary
+    /* __itt_heap_allocate_begin(0, el_n * el_size, 0); */
 	void *ptr = (ref->realloc
 	             ? ref->realloc   (ref->allocator, 0, el_n, el_size)
 	             : REFEREE_REALLOC(ref->allocator, 0, el_n, el_size));
+    /* __itt_heap_allocate_end(0, ptr, el_n * el_size, 0); */
+
     return (ptr
             ? ref_add_n_(ref, ptr, el_n, el_size, init_refs)
             : ptr);
@@ -242,21 +247,34 @@ REFEREE_API inline void *
 REF_DBG(ref_new, Referee *ref, size_t size, size_t init_refs)
 {   return ref_new_n_(ref, 1, size, init_refs);   }
 
+
+// TODO(api): this is to realloc as add is to new - make naming scheme consistent
+// doesn't perform the reallocation, just tracks that it has happened
+REFEREE_API inline void *
+REF_DBG(ref_register_realloc_n, Referee *ref, void *ptr, void *ptr_p, size_t el_n, size_t el_size, size_t init_refs)
+{
+    REFEREE_register_realloc(ptr, ptr_p, el_n, el_size, line, file, func, call);
+    if (ptr)
+    {
+        // TODO: incorporate init_refs for existing ptrs?
+        RefInfo info = ref__map_remove(&ref->ptr_infos, ptr_p);
+        ref_add_n_(ref, ptr, el_n, el_size, (~ info.refcount
+                                             ? info.refcount
+                                             : init_refs));
+    }
+    return ptr;
+}
+
 REFEREE_API inline void *
 REF_DBG(ref_realloc_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs)
 {
+    /* __itt_heap_reallocate_begin(0, ptr, el_n * el_size, 0); */
     void *result = (ref->realloc
-                     ? ref->realloc   (ref->allocator, ptr, el_n, el_size)
-                     : REFEREE_REALLOC(ref->allocator, ptr, el_n, el_size));
+                    ? ref->realloc   (ref->allocator, ptr, el_n, el_size)
+                    : REFEREE_REALLOC(ref->allocator, ptr, el_n, el_size));
+    /* __itt_heap_reallocate_end(0, ptr, result, el_n * el_size, 0); */
 
-    if (result)
-    {
-        // TODO: incorporate init_refs for existing ptrs?
-        RefInfo info = ref__map_remove(&ref->ptr_infos, ptr);
-        ref_add_n_(ref, result, el_n, el_size, (~ info.refcount
-                                                ? info.refcount
-                                                : init_refs));
-    }
+    ref_register_realloc_n_(ref, result, ptr, el_n, el_size, init_refs);
     return result;
 }
 
@@ -322,8 +340,10 @@ ref_free(Referee *ref, void *ptr)
     RefInfo info = ref__map_remove(&ref->ptr_infos, ptr);
     if (~ info.refcount)
     {
+        /* __itt_heap_free_begin(0, ptr); */
         if (ref->free) { ref->free(ref->allocator, ptr); }
         else           { REFEREE_FREE(ref->allocator, ptr); }
+        /* __itt_heap_free_end(0, ptr); */
     }
     return 0;
 }
@@ -396,7 +416,7 @@ ref_dump_mem_usage(FILE *out, Referee *ref, int should_destructively_sort)
             "%zu bytes. %s - %s(%zu) - \t %s\n",
             //(unsigned long long)ptr,
             info.el_n * info.el_size,
-            info.func, info.file, info.line, info.args);
+            info.func, info.file, info.line, info.call);
     }
     fputc('\n', out);
 }
