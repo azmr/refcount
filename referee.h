@@ -401,7 +401,7 @@ RefInfo_cmp_size(const void *a, const void *b)
 REFEREE_API void
 ref_dump_mem_usage(FILE *out, Referee *ref, int should_destructively_sort)
 {
-    printf("Total memory tracked: %zu\n", ref_total_size(ref));
+    fprintf(out, "Total memory tracked: %zu\n", ref_total_size(ref));
 
     if (should_destructively_sort)
     {   qsort(ref->ptr_infos.vals, ref->ptr_infos.n, sizeof(ref->ptr_infos.vals[0]), RefInfo_cmp_size);   }
