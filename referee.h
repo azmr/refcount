@@ -227,14 +227,33 @@ ref_remove(Referee *ref, void *ptr)
 {   ref__map_remove(&ref->ptr_infos, ptr); return ptr;   }
 
 
+REFEREE_API void *
+ref_default_realloc(void *allocator, void *ptr, size_t el_n, size_t el_size)
+{
+    (void)allocator;
+    return REFEREE_REALLOC(allocator, ptr, el_n, el_size);
+}
+
+REFEREE_API void
+ref_default_free(void *allocator, void *ptr)
+{
+    (void)allocator;
+    REFEREE_FREE(allocator, ptr);
+}
+
+REFEREE_API void
+ref_set_default_allocator(Referee *ref)
+{
+    ref->realloc = ref_default_realloc;
+    ref->free    = ref_default_free;
+}
+
 REFEREE_API inline void *
 REF_DBG(ref_new_n, Referee *ref, size_t el_n, size_t el_size, size_t init_refs)
 {
-	// TODO(api): could require an init, then these checks wouldn't be necessary
+	if (! ref->realloc || ! ref->free) { ref_set_default_allocator(ref); }
     /* __itt_heap_allocate_begin(0, el_n * el_size, 0); */
-	void *ptr = (ref->realloc
-	             ? ref->realloc   (ref->allocator, 0, el_n, el_size)
-	             : REFEREE_REALLOC(ref->allocator, 0, el_n, el_size));
+	void *ptr = ref->realloc(ref->allocator, 0, el_n, el_size);
     /* __itt_heap_allocate_end(0, ptr, el_n * el_size, 0); */
 
     return (ptr
@@ -268,10 +287,9 @@ REF_DBG(ref_register_realloc_n, Referee *ref, void *ptr, void *ptr_p, size_t el_
 REFEREE_API inline void *
 REF_DBG(ref_realloc_n, Referee *ref, void *ptr, size_t el_n, size_t el_size, size_t init_refs)
 {
+	if (! ref->realloc || ! ref->free) { ref_set_default_allocator(ref); }
     /* __itt_heap_reallocate_begin(0, ptr, el_n * el_size, 0); */
-    void *result = (ref->realloc
-                    ? ref->realloc   (ref->allocator, ptr, el_n, el_size)
-                    : REFEREE_REALLOC(ref->allocator, ptr, el_n, el_size));
+    void *result = ref->realloc   (ref->allocator, ptr, el_n, el_size);
     /* __itt_heap_reallocate_end(0, ptr, result, el_n * el_size, 0); */
 
     ref_register_realloc_n_(ref, result, ptr, el_n, el_size, init_refs);
@@ -340,9 +358,9 @@ ref_free(Referee *ref, void *ptr)
     RefInfo info = ref__map_remove(&ref->ptr_infos, ptr);
     if (~ info.refcount)
     {
+        assert(ref->free && "this should be set on initial allocation");
         /* __itt_heap_free_begin(0, ptr); */
-        if (ref->free) { ref->free(ref->allocator, ptr); }
-        else           { REFEREE_FREE(ref->allocator, ptr); }
+        ref->free(ref->allocator, ptr);
         /* __itt_heap_free_end(0, ptr); */
     }
     return 0;
